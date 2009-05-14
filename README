@@ -1,0 +1,70 @@
+mod_auth_foafssl
+FOAF+SSL authentication module for Apache 2
+
+* Authentication requires SSL client certificates.  You must first configure
+  mod_ssl properly in your Apache configuration.
+
+The latest version of this module can be found at:
+<http://dig.csail.mit.edu/2009/mod_auth_foafssl/>
+<https://svn.csail.mit.edu/dig/2009/mod_auth_foafssl/>
+
+Visit the W3 ESW wiki for more information about FOAF+SSL:
+<http://esw.w3.org/topic/foaf+ssl>
+
+
+= Prerequisites =
+
+Development versions of the following packages for your Linux
+distribution (yum):
+
+* Apache 2.2 (httpd-devel)
+* Redland 1.0.7 (redland-devel)
+* OpenSSL 0.9.8g (openssl-devel)
+
+
+= Installing =
+
+As root,
+# make install
+
+The install Makefile target calls Apache's apxs utility to create and install
+the mod_auth_foafssl DSO according to Apache defaults.
+
+
+= Example Configuration =
+
+== httpd.conf ==
+
+LoadModule auth_foafssl_module modules/mod_auth_foafssl.so
+
+<Directory />
+    AuthType FOAFSSL
+    Require valid-user
+</Directory>
+
+
+= Authentication Details =
+
+Clients are verified using the following SPARQL query:
+
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX cert: <http://www.w3.org/ns/auth/cert#>
+PREFIX rsa: <http://www.w3.org/ns/auth/rsa#>
+SELECT ?mod_hex WHERE {
+    ?key rdf:type rsa:RSAPublicKey.
+    ?key rsa:public_exponent ?exp.
+    ?key rsa:modulus ?mod.
+    ?exp cert:decimal \"%d\".
+    ?mod cert:hex ?mod_hex.
+}
+
+Matching modulus and exponent triggers successful authentication.
+Only hex characters [0-9a-f] are considered for modulus comparison.
+
+
+= Credits =
+
+Joe Presbrey <presbrey@csail.mit.edu>
+Feel free to contact me with any comments or suggestions.
+
+$Id$
