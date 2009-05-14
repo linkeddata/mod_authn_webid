@@ -1,5 +1,5 @@
-/* mod_auth_foafssl
- * FOAF+SSL authentication module for Apache 2
+/* mod_authn_webid
+ * WebID FOAF+SSL authentication module for Apache 2
  *
  * Joe Presbrey <presbrey@csail.mit.edu>
  *
@@ -28,19 +28,19 @@ static APR_OPTIONAL_FN_TYPE(ssl_ext_lookup) *ssl_ext_lookup;
 
 typedef struct {
     int authoritative;
-} auth_foafssl_config_rec;
+} authn_webid_config_rec;
 
 static void *
-create_auth_foafssl_dir_config(apr_pool_t *p, char *dirspec) {
-    auth_foafssl_config_rec *conf = apr_pcalloc(p, sizeof(*conf));
+create_authn_webid_dir_config(apr_pool_t *p, char *dirspec) {
+    authn_webid_config_rec *conf = apr_pcalloc(p, sizeof(*conf));
 
     conf->authoritative = -1;
     return conf;
 }
 
 static void *
-merge_auth_foafssl_dir_config(apr_pool_t *p, void *parent_conf, void *newloc_conf) {
-    auth_foafssl_config_rec *pconf = parent_conf, *nconf = newloc_conf,
+merge_authn_webid_dir_config(apr_pool_t *p, void *parent_conf, void *newloc_conf) {
+    authn_webid_config_rec *pconf = parent_conf, *nconf = newloc_conf,
     *conf = apr_pcalloc(p, sizeof(*conf));
 
     conf->authoritative = (nconf->authoritative != -1) ?
@@ -49,16 +49,16 @@ merge_auth_foafssl_dir_config(apr_pool_t *p, void *parent_conf, void *newloc_con
 }
 
 static const command_rec
-auth_foafssl_cmds[] = {
-    AP_INIT_FLAG("AuthFOAFSSLAuthoritative", ap_set_flag_slot,
-                 (void *)APR_OFFSETOF(auth_foafssl_config_rec, authoritative),
+authn_webid_cmds[] = {
+    AP_INIT_FLAG("AuthWebIDAuthoritative", ap_set_flag_slot,
+                 (void *)APR_OFFSETOF(authn_webid_config_rec, authoritative),
                  OR_AUTHCFG,
                  "Set to 'Off' to allow access control to be passed along to "
                  "lower modules if the WebID is not known to this module"),
     {NULL}
 };
 
-module AP_MODULE_DECLARE_DATA auth_foafssl_module;
+module AP_MODULE_DECLARE_DATA authn_webid_module;
 
 static int
 hex_or_x(int c) {
@@ -71,15 +71,15 @@ hex_or_x(int c) {
 }
 
 static int
-foaf_matches_pkey(unsigned char *foaf, char *pkey) {
-    if (foaf == NULL || pkey == NULL)
+matches_pkey(unsigned char *s, char *pkey) {
+    if (s == NULL || pkey == NULL)
         return 0;
-    unsigned int s_foaf = strlen(foaf);
+    unsigned int s_s = strlen(s);
     unsigned int s_pkey = strlen(pkey);
     unsigned int fc, pc, j, k = 0;
 
-    for (j = 0; j < s_foaf; j++) {
-        if ((fc = hex_or_x(foaf[j])) == 'x')
+    for (j = 0; j < s_s; j++) {
+        if ((fc = hex_or_x(s[j])) == 'x')
             continue;
         pc = hex_or_x(pkey[k]);
         if (fc != pc)
@@ -92,19 +92,19 @@ foaf_matches_pkey(unsigned char *foaf, char *pkey) {
 }
 
 static int
-authenticate_foafssl_user(request_rec *request) {
+authenticate_webid_user(request_rec *request) {
     int r = 0;
-    auth_foafssl_config_rec *conf =
-        ap_get_module_config(request->per_dir_config, &auth_foafssl_module);
+    authn_webid_config_rec *conf =
+        ap_get_module_config(request->per_dir_config, &authn_webid_module);
     if (!conf->authoritative) r = DECLINED;
     else r = HTTP_UNAUTHORIZED;
 
-    /* Check for AuthType FOAFSSL */
+    /* Check for AuthType WebID */
     const char *current_auth = ap_auth_type(request);
-    if (!current_auth || strcasecmp(current_auth, "FOAFSSL") != 0) {
+    if (!current_auth || strcasecmp(current_auth, "WebID") != 0) {
         return DECLINED;
     }
-    request->ap_auth_type = "FOAFSSL";
+    request->ap_auth_type = "WebID";
 
     const char *subjAltName;
     char *pkey_n = NULL;
@@ -147,7 +147,7 @@ authenticate_foafssl_user(request_rec *request) {
         pkey_e = apr_pstrndup(request->pool, bptr->data, bptr->length);
         BIO_free(bio);
     } else {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "FOAFSSL: invalid client certificate");
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: invalid client certificate");
     }
 
     if (rsa)
@@ -165,9 +165,9 @@ authenticate_foafssl_user(request_rec *request) {
 
     if (subjAltName != NULL
         && pkey_n != NULL && pkey_e != NULL) {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "FOAFSSL: subjectAltName = %s", subjAltName);
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "FOAFSSL: client pkey.n  = %s", pkey_n);
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "FOAFSSL: client pkey.e  = %s", pkey_e);
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: subjectAltName = %s", subjAltName);
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.n  = %s", pkey_n);
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.e  = %s", pkey_e);
 
         rdf_world = librdf_new_world();
         if (rdf_world != NULL) {
@@ -186,7 +186,7 @@ authenticate_foafssl_user(request_rec *request) {
             " ?exp cert:decimal \"%d\"."
             " ?mod cert:hex ?mod_hex."
             " }", apr_strtoi64(pkey_e, NULL, 16));
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "FOAFSSL: query = %s", c_query);
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: query = %s", c_query);
         if (rdf_model != NULL) rdf_query = librdf_new_query(rdf_world, "sparql", NULL, (unsigned char *)c_query, NULL);
 
         if (rdf_query != NULL) {
@@ -197,8 +197,8 @@ authenticate_foafssl_user(request_rec *request) {
                     unsigned char *mod_hex;
                     while (NULL != (rdf_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "mod_hex"))) {
                         mod_hex = librdf_node_get_literal_value(rdf_node);
-                        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "FOAFSSL: modulus = %s", mod_hex);
-                        if (foaf_matches_pkey(mod_hex, pkey_n)) {
+                        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: modulus = %s", mod_hex);
+                        if (matches_pkey(mod_hex, pkey_n)) {
                             request->user = apr_psprintf(request->pool, "<%s>", subjAltName);
                             r = OK;
                             break;
@@ -209,10 +209,10 @@ authenticate_foafssl_user(request_rec *request) {
                 }
                 librdf_free_query_results(rdf_query_results);
             } else
-                ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "FOAFSSL: librdf_query_execute returned NULL");
+                ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_query_execute returned NULL");
             librdf_free_query(rdf_query);
         } else
-            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "FOAFSSL: librdf_new_query returned NULL");
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_query returned NULL");
 
         if (rdf_model) librdf_free_model(rdf_model);
         if (rdf_storage) librdf_free_storage(rdf_storage);
@@ -221,13 +221,13 @@ authenticate_foafssl_user(request_rec *request) {
 
     if (conf->authoritative && r != OK) {
         if (subjAltName != NULL) {
-            ap_log_rerror(APLOG_MARK, APLOG_INFO | APLOG_TOCLIENT, 0, request, "FOAFSSL client authentication failed, FOAF URI: <%s>", subjAltName);
+            ap_log_rerror(APLOG_MARK, APLOG_INFO | APLOG_TOCLIENT, 0, request, "WebID authentication failed: <%s>. Request URI: %s", subjAltName, request->uri);
         } else {
-            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "FOAFSSL client authentication failed, local URI: %s", request->uri);
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID authentication failed. Request URI: %s", request->uri);
         }
     }
     else if (r == OK)
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "FOAFSSL client authentication succeeded, FOAF URI: <%s>, local URI: %s", subjAltName, request->uri);
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID authentication succeeded: <%s>. Request URI: %s", subjAltName, request->uri);
     return r;
 }
 
@@ -239,17 +239,17 @@ import_ssl_func() {
 
 static void
 register_hooks(apr_pool_t *p) {
-    ap_hook_check_user_id(authenticate_foafssl_user, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_check_user_id(authenticate_webid_user, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_optional_fn_retrieve(import_ssl_func, NULL, NULL, APR_HOOK_MIDDLE);
 }
 
 module AP_MODULE_DECLARE_DATA
-auth_foafssl_module = {
+authn_webid_module = {
     STANDARD20_MODULE_STUFF,
-    create_auth_foafssl_dir_config,  /* dir config creater */
-    merge_auth_foafssl_dir_config,   /* dir merger */
-    NULL,                            /* server config */
-    NULL,                            /* merge server config */
-    auth_foafssl_cmds,               /* command apr_table_t */
-    register_hooks                   /* register hooks */
+    create_authn_webid_dir_config,
+    merge_authn_webid_dir_config,
+    NULL,
+    NULL,
+    authn_webid_cmds,
+    register_hooks
 };

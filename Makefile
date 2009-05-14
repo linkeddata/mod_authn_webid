@@ -1,8 +1,8 @@
 all:
-	apxs -c -I/usr/include/rasqal -lcrypto -lrdf mod_auth_foafssl.c
+	apxs -c -I/usr/include/rasqal -lcrypto -lrdf mod_authn_webid.c
 
 install:
-	apxs -c -i -I/usr/include/rasqal -lcrypto -lrdf mod_auth_foafssl.c
+	apxs -c -i -I/usr/include/rasqal -lcrypto -lrdf mod_authn_webid.c
 
 clean:
-	rm -f mod_auth_foafssl.{la,lo,slo,o} -r .libs
+	rm -f mod_authn_webid.{la,lo,slo,o} -r .libs

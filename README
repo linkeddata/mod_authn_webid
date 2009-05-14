@@ -1,12 +1,12 @@
-mod_auth_foafssl
-FOAF+SSL authentication module for Apache 2
+mod_authn_webid
+WebID FOAF+SSL authentication module for Apache 2
 
 * Authentication requires SSL client certificates.  You must first configure
   mod_ssl properly in your Apache configuration.
 
 The latest version of this module can be found at:
-<http://dig.csail.mit.edu/2009/mod_auth_foafssl/>
-<https://svn.csail.mit.edu/dig/2009/mod_auth_foafssl/>
+<http://dig.csail.mit.edu/2009/mod_authn_webid/>
+<https://svn.csail.mit.edu/dig/2009/mod_authn_webid/>
 
 Visit the W3 ESW wiki for more information about FOAF+SSL:
 <http://esw.w3.org/topic/foaf+ssl>
@@ -28,17 +28,17 @@ As root,
 # make install
 
 The install Makefile target calls Apache's apxs utility to create and install
-the mod_auth_foafssl DSO according to Apache defaults.
+the mod_authn_webid DSO according to Apache defaults.
 
 
 = Example Configuration =
 
 == httpd.conf ==
 
-LoadModule auth_foafssl_module modules/mod_auth_foafssl.so
+LoadModule authn_webid_module modules/mod_authn_webid.so
 
 <Directory />
-    AuthType FOAFSSL
+    AuthType WebID
     Require valid-user
 </Directory>
 
