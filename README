@@ -21,14 +21,19 @@ distribution (yum):
 * Redland 1.0.7 (redland-devel)
 * OpenSSL 0.9.8g (openssl-devel)
 
+These are the versions I used for development, though I would expect other
+minor versions of these packages to also work.
+
 
 = Installing =
 
-As root,
+As root, the following compilation procedure should work:
+# autoconf
+# ./configure
 # make install
 
-The install Makefile target calls Apache's apxs utility to create and install
-the mod_authn_webid DSO according to Apache defaults.
+The 'make install' command calls Apache's apxs utility to create and install
+the mod_authn_webid DSO using default Apache module installation parameters.
 
 
 = Example Configuration =
