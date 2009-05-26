@@ -1,0 +1,8 @@
+all:
+	@APXS@ -c @PKG_CFLAGS@ @PKG_LIBS@ mod_authn_webid.c
+
+install:
+	@APXS@ -c -i @PKG_CFLAGS@ @PKG_LIBS@ mod_authn_webid.c
+
+clean:
+	rm -f mod_authn_webid.{la,lo,slo,o} -r .libs
