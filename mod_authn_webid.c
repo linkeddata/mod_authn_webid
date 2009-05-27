@@ -23,6 +23,8 @@
 #include "openssl/ssl.h"
 #include "redland.h"
 
+#define UD_WEBID_KEY "mod_authn_webid:client_WebID"
+
 static APR_OPTIONAL_FN_TYPE(ssl_var_lookup) *ssl_var_lookup;
 static APR_OPTIONAL_FN_TYPE(ssl_ext_lookup) *ssl_ext_lookup;
 
@@ -105,6 +107,17 @@ authenticate_webid_user(request_rec *request) {
         return DECLINED;
     }
     request->ap_auth_type = "WebID";
+
+    {
+        void *data = NULL;
+        const char *webid;
+        if (apr_pool_userdata_get(&data, UD_WEBID_KEY, request->connection->pool) == APR_SUCCESS && data != NULL) {
+            webid = data;
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "using connection cached WebID: %s", webid);
+            request->user = apr_pstrdup(request->pool, webid);
+            return OK;
+        }
+    }
 
     const char *subjAltName;
     char *pkey_n = NULL;
@@ -199,7 +212,6 @@ authenticate_webid_user(request_rec *request) {
                         mod_hex = librdf_node_get_literal_value(rdf_node);
                         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: modulus = %s", mod_hex);
                         if (matches_pkey(mod_hex, pkey_n)) {
-                            request->user = apr_psprintf(request->pool, "<%s>", subjAltName);
                             r = OK;
                             break;
                         }
@@ -226,8 +238,15 @@ authenticate_webid_user(request_rec *request) {
             ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID authentication failed. Request URI: %s", request->uri);
         }
     }
-    else if (r == OK)
+    else if (r == OK) {
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID authentication succeeded: <%s>. Request URI: %s", subjAltName, request->uri);
+        request->user = apr_psprintf(request->connection->pool, "<%s>", subjAltName);
+        {
+            apr_status_t rv;
+            rv = apr_pool_userdata_set(request->user, UD_WEBID_KEY, NULL, request->connection->pool);
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, rv, request, "set connection cached WebID: %s", request->user);
+        }
+    }
     return r;
 }
 
