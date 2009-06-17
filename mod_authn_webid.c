@@ -186,8 +186,11 @@ authenticate_webid_user(request_rec *request) {
         if (rdf_world != NULL) {
             librdf_world_open(rdf_world);
             rdf_storage = librdf_new_storage(rdf_world, "uri", subjAltName, NULL);
+            if (rdf_storage != NULL) {
+                rdf_model = librdf_new_model(rdf_world, rdf_storage, NULL);
+            } else
+                ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_storage returned NULL");
         }
-        if (rdf_storage != NULL) rdf_model = librdf_new_model(rdf_world, rdf_storage, NULL);
         char *c_query = apr_psprintf(request->pool,
             " PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>"
             " PREFIX cert: <http://www.w3.org/ns/auth/cert#>"
@@ -200,7 +203,11 @@ authenticate_webid_user(request_rec *request) {
             " ?mod cert:hex ?mod_hex."
             " }", apr_strtoi64(pkey_e, NULL, 16));
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: query = %s", c_query);
-        if (rdf_model != NULL) rdf_query = librdf_new_query(rdf_world, "sparql", NULL, (unsigned char *)c_query, NULL);
+
+        if (rdf_model != NULL) {
+            rdf_query = librdf_new_query(rdf_world, "sparql", NULL, (unsigned char *)c_query, NULL);
+        } else
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_query returned NULL");
 
         if (rdf_query != NULL) {
             rdf_query_results = librdf_query_execute(rdf_query, rdf_model);
