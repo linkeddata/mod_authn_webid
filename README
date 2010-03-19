@@ -36,9 +36,13 @@ The 'make install' command calls Apache's apxs utility to create and install
 the mod_authn_webid DSO using default Apache module installation parameters.
 
 
-= Example Configuration =
+= Configuration =
 
-== httpd.conf ==
+AuthWebIDAuthoritative
+- Set to 'Off' to allow access control to be passed along to lower modules if
+  the WebID is not known to this module
+
+== Sample httpd.conf ==
 
 LoadModule authn_webid_module modules/mod_authn_webid.so
 
