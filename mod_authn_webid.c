@@ -217,7 +217,7 @@ authenticate_webid_user(request_rec *request) {
                     librdf_node *m_node, *e_node;
                     unsigned char *rdf_mod;
                     unsigned char *rdf_exp;
-                    while (r != OK
+                    if (r != OK
                         && NULL != (m_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "m"))
                         && NULL != (e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "e"))) {
                         if (librdf_node_get_type(m_node) != LIBRDF_NODE_TYPE_LITERAL) {
