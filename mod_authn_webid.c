@@ -25,6 +25,16 @@
 
 #define UD_WEBID_KEY "mod_authn_webid:client_WebID"
 
+#define SPARQL_WEBID \
+    "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>" \
+    "PREFIX cert: <http://www.w3.org/ns/auth/cert#>" \
+    "PREFIX rsa: <http://www.w3.org/ns/auth/rsa#>" \
+    "SELECT ?m ?e ?mod ?exp WHERE {" \
+    "  ?key a rsa:RSAPublicKey; rsa:modulus ?m; rsa:public_exponent ?e." \
+    "  OPTIONAL { ?m cert:hex ?mod . }" \
+    "  OPTIONAL { ?e cert:decimal ?exp. }" \
+    "}"
+
 static APR_OPTIONAL_FN_TYPE(ssl_var_lookup) *ssl_var_lookup;
 static APR_OPTIONAL_FN_TYPE(ssl_ext_lookup) *ssl_ext_lookup;
 
@@ -76,7 +86,7 @@ static int
 matches_pkey(unsigned char *s, char *pkey) {
     if (s == NULL || pkey == NULL)
         return 0;
-    unsigned int s_s = strlen(s);
+    unsigned int s_s = strlen((const char*)s);
     unsigned int s_pkey = strlen(pkey);
     unsigned int fc, pc, j, k = 0;
 
@@ -122,6 +132,7 @@ authenticate_webid_user(request_rec *request) {
     const char *subjAltName;
     char *pkey_n = NULL;
     char *pkey_e = NULL;
+    unsigned int pkey_e_i = 0;
 
     subjAltName = ssl_ext_lookup(request->pool, request->connection, 1, "2.5.29.17");
     if (subjAltName != NULL) {
@@ -158,6 +169,7 @@ authenticate_webid_user(request_rec *request) {
         BN_print(bio, rsa->e);
         BIO_get_mem_ptr(bio, &bptr);
         pkey_e = apr_pstrndup(request->pool, bptr->data, bptr->length);
+        pkey_e_i = apr_strtoi64(pkey_e, NULL, 16);
         BIO_free(bio);
     } else {
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: invalid client certificate");
@@ -180,7 +192,7 @@ authenticate_webid_user(request_rec *request) {
         && pkey_n != NULL && pkey_e != NULL) {
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: subjectAltName = %s", subjAltName);
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.n  = %s", pkey_n);
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.e  = %s", pkey_e);
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.e  = %d (%s)", pkey_e_i, pkey_e);
 
         rdf_world = librdf_new_world();
         if (rdf_world != NULL) {
@@ -191,39 +203,39 @@ authenticate_webid_user(request_rec *request) {
             } else
                 ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_storage returned NULL");
         }
-        char *c_query = apr_psprintf(request->pool,
-            " PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>"
-            " PREFIX cert: <http://www.w3.org/ns/auth/cert#>"
-            " PREFIX rsa: <http://www.w3.org/ns/auth/rsa#>"
-            " SELECT ?mod_hex WHERE {"
-            " ?key rdf:type rsa:RSAPublicKey."
-            " ?key rsa:public_exponent ?exp."
-            " ?key rsa:modulus ?mod."
-            " ?exp cert:decimal \"%d\"."
-            " ?mod cert:hex ?mod_hex."
-            " }", apr_strtoi64(pkey_e, NULL, 16));
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: query = %s", c_query);
 
-        if (rdf_model != NULL) {
-            rdf_query = librdf_new_query(rdf_world, "sparql", NULL, (unsigned char *)c_query, NULL);
-        } else
+        if (rdf_model != NULL)
+            rdf_query = librdf_new_query(rdf_world, "sparql", NULL, (unsigned char*)SPARQL_WEBID, NULL);
+        else
             ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_query returned NULL");
 
         if (rdf_query != NULL) {
             rdf_query_results = librdf_query_execute(rdf_query, rdf_model);
             if (rdf_query_results != NULL) {
-                if (librdf_query_results_get_count(rdf_query_results) > 0) {
-                    librdf_node *rdf_node;
-                    unsigned char *mod_hex;
-                    while (NULL != (rdf_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "mod_hex"))) {
-                        mod_hex = librdf_node_get_literal_value(rdf_node);
-                        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: modulus = %s", mod_hex);
-                        if (matches_pkey(mod_hex, pkey_n)) {
-                            r = OK;
-                            break;
+                
+                for (; r != OK && librdf_query_results_finished(rdf_query_results)==0; librdf_query_results_next(rdf_query_results)) {
+                    librdf_node *m_node, *e_node;
+                    unsigned char *rdf_mod;
+                    unsigned char *rdf_exp;
+                    while (r != OK
+                        && NULL != (m_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "m"))
+                        && NULL != (e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "e"))) {
+                        if (librdf_node_get_type(m_node) != LIBRDF_NODE_TYPE_LITERAL) {
+                            librdf_free_node(m_node);
+                            librdf_free_node(e_node);
+                            m_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "mod");
+                            e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "exp");
                         }
-                        librdf_free_node(rdf_node);
-                        if (librdf_query_results_next(rdf_query_results)) break;
+                        rdf_mod = librdf_node_get_literal_value(m_node);
+                        rdf_exp = librdf_node_get_literal_value(e_node);
+                        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: modulus = %s", rdf_mod);
+                        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: exponent = %s", rdf_exp);
+                        if (rdf_exp != NULL
+                            && apr_strtoi64((char*)rdf_exp, NULL, 10) == pkey_e_i
+                            && matches_pkey(rdf_mod, pkey_n))
+                            r = OK;
+                        librdf_free_node(m_node);
+                        librdf_free_node(e_node);
                     }
                 }
                 librdf_free_query_results(rdf_query_results);
