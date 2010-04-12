@@ -60,19 +60,21 @@ PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX cert: <http://www.w3.org/ns/auth/cert#>
 PREFIX rsa: <http://www.w3.org/ns/auth/rsa#>
 SELECT ?m ?e ?mod ?exp WHERE {
-    ?key a rsa:RSAPublicKey;
+    ?key cert:identity <%s>;
          rsa:modulus ?m;
          rsa:public_exponent ?e.
     OPTIONAL { ?m cert:hex ?mod . }
     OPTIONAL { ?e cert:decimal ?exp. }
 }
 
-(The optional clauses maintain compatibility for users with FOAF WebIDs
-before the changes to the cert datatypes discussed on foaf-protocols here:
-http://lists.foaf-project.org/pipermail/foaf-protocols/2010-March/001857.html)
+%s is substituted by the client's WebID claim.
 
 Matching modulus and exponent triggers successful authentication.
 Only hex characters [0-9a-f] are considered for modulus comparison.
+
+(The optional clauses maintain compatibility for users with FOAF WebIDs
+before the changes to the cert datatypes discussed on foaf-protocols here:
+http://lists.foaf-project.org/pipermail/foaf-protocols/2010-March/001857.html)
 
 
 = Credits =

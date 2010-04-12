@@ -30,8 +30,8 @@
     "PREFIX cert: <http://www.w3.org/ns/auth/cert#>" \
     "PREFIX rsa: <http://www.w3.org/ns/auth/rsa#>" \
     "SELECT ?m ?e ?mod ?exp WHERE {" \
-    "  ?key a rsa:RSAPublicKey; rsa:modulus ?m; rsa:public_exponent ?e." \
-    "  OPTIONAL { ?m cert:hex ?mod . }" \
+    "  ?key cert:identity <%s>; rsa:modulus ?m; rsa:public_exponent ?e." \
+    "  OPTIONAL { ?m cert:hex ?mod. }" \
     "  OPTIONAL { ?e cert:decimal ?exp. }" \
     "}"
 
@@ -204,15 +204,17 @@ authenticate_webid_user(request_rec *request) {
                 ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_storage returned NULL");
         }
 
-        if (rdf_model != NULL)
-            rdf_query = librdf_new_query(rdf_world, "sparql", NULL, (unsigned char*)SPARQL_WEBID, NULL);
-        else
+        if (rdf_model != NULL) {
+            char *c_query = apr_psprintf(request->pool, SPARQL_WEBID, subjAltName);
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: SPARQL query   = %s", c_query);
+            rdf_query = librdf_new_query(rdf_world, "sparql", NULL, (unsigned char*)c_query, NULL);
+        } else {
             ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_query returned NULL");
+        }
 
         if (rdf_query != NULL) {
             rdf_query_results = librdf_query_execute(rdf_query, rdf_model);
             if (rdf_query_results != NULL) {
-                
                 for (; r != OK && librdf_query_results_finished(rdf_query_results)==0; librdf_query_results_next(rdf_query_results)) {
                     librdf_node *m_node, *e_node;
                     unsigned char *rdf_mod;
@@ -222,20 +224,25 @@ authenticate_webid_user(request_rec *request) {
                         && NULL != (e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "e"))) {
                         if (librdf_node_get_type(m_node) != LIBRDF_NODE_TYPE_LITERAL) {
                             librdf_free_node(m_node);
-                            librdf_free_node(e_node);
                             m_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "mod");
+                        }
+                        if (librdf_node_get_type(e_node) != LIBRDF_NODE_TYPE_LITERAL) {
+                            librdf_free_node(e_node);
                             e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "exp");
                         }
-                        rdf_mod = librdf_node_get_literal_value(m_node);
-                        rdf_exp = librdf_node_get_literal_value(e_node);
-                        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: modulus = %s", rdf_mod);
-                        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: exponent = %s", rdf_exp);
-                        if (rdf_exp != NULL
-                            && apr_strtoi64((char*)rdf_exp, NULL, 10) == pkey_e_i
-                            && matches_pkey(rdf_mod, pkey_n))
-                            r = OK;
-                        librdf_free_node(m_node);
-                        librdf_free_node(e_node);
+                        if (librdf_node_get_type(m_node) == LIBRDF_NODE_TYPE_LITERAL
+                            && librdf_node_get_type(e_node) == LIBRDF_NODE_TYPE_LITERAL) {
+                            rdf_mod = librdf_node_get_literal_value(m_node);
+                            rdf_exp = librdf_node_get_literal_value(e_node);
+                            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: modulus = %s", rdf_mod);
+                            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: exponent = %s", rdf_exp);
+                            if (rdf_exp != NULL
+                                && apr_strtoi64((char*)rdf_exp, NULL, 10) == pkey_e_i
+                                && matches_pkey(rdf_mod, pkey_n))
+                                r = OK;
+                            librdf_free_node(m_node);
+                            librdf_free_node(e_node);
+                        }
                     }
                 }
                 librdf_free_query_results(rdf_query_results);
