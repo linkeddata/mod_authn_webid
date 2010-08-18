@@ -1,0 +1,94 @@
+<h2>WebID FOAF+SSL authentication module for Apache 2</h2>
+
+<strong>Authentication requires SSL client certificates. First configure
+  mod_ssl properly in your Apache configuration.</strong>
+
+<p>The latest version of this module can be found at:</p>
+<ul>
+<li>http://dig.csail.mit.edu/2009/mod_authn_webid/</li>
+<li>https://svn.csail.mit.edu/dig/2009/mod_authn_webid/</li>
+</ul>
+
+<p>Visit the W3 ESW wiki for more information about FOAF+SSL:</p>
+<ul>
+<li>http://esw.w3.org/topic/foaf+ssl</li>
+</ul>
+
+<h3>Prerequisites</h3>
+
+<p>Development versions of the following packages for your Linux
+distribution:</p>
+
+<ul>
+<li>Apache &gt;=2.2 (httpd-devel)</li>
+<li>Redland &gt;=1.0.7 (redland-devel)</li>
+<li>OpenSSL &gt;=0.9.8g (openssl-devel)</li>
+</ul>
+
+<h3>Installing</h3>
+ 
+<p>Use the following compilation and installation procedure:</p>
+
+<pre>
+$ autoconf
+$ ./configure
+$ sudo make install
+</pre>
+
+<p>The 'make install' command calls Apache's apxs utility to create and install
+the mod_authn_webid DSO using default Apache module installation parameters.</p>
+
+<h3>Configuration Directives</h3>
+
+<dl>
+<dt>AuthWebIDAuthoritative</dt>
+<dd>Set to 'Off' to allow access control to be passed along to lower modules if
+  the WebID is not known to this module</dd>
+</dl>
+
+<h3>Sample httpd.conf</h3>
+
+<pre>LoadModule authn_webid_module modules/mod_authn_webid.so
+
+&lt;Directory /&gt;
+    AuthType WebID
+    Require valid-user
+&lt;/Directory&gt;</pre>
+
+<h3>Authentication Details</h3>
+
+<p>Clients are verified using the following SPARQL query:</p>
+
+<pre>
+PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+PREFIX cert: &lt;http://www.w3.org/ns/auth/cert#&gt;
+PREFIX rsa: &lt;http://www.w3.org/ns/auth/rsa#&gt;
+SELECT ?m ?e ?mod ?exp WHERE {
+    ?key cert:identity &lt;%s&gt;;
+         rsa:modulus ?m;
+         rsa:public_exponent ?e.
+    OPTIONAL { ?m cert:hex ?mod . }
+    OPTIONAL { ?e cert:decimal ?exp. }
+}
+</pre>
+
+<p>%s is substituted by the client's WebID claim.</p>
+
+<p>Matching modulus and exponent triggers successful authentication.
+Only hex characters [0-9a-f] are considered for modulus comparison.</p>
+
+<p>(The optional clauses maintain compatibility for users with FOAF WebIDs
+before the changes to the cert datatypes discussed on foaf-protocols here:
+http://lists.foaf-project.org/pipermail/foaf-protocols/2010-March/001857.html)</p>
+
+<h3>Support</h3>
+
+<p>Please visit the <a href="http://dig.xvm.mit.edu/redmine/projects/authn-webid">issue tracker</a>
+for bug and feature requests.</p>
+
+<h3>Contact</h3>
+
+<p>Joe Presbrey<br />
+presbrey@csail.mit.edu</p>
+
+$Id: README 28777 2010-04-12 20:49:23Z presbrey $
