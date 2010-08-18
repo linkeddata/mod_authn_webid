@@ -1,8 +1,5 @@
 <h2>WebID FOAF+SSL authentication module for Apache 2</h2>
 
-<strong>Authentication requires SSL client certificates. First configure
-  mod_ssl properly in your Apache configuration.</strong>
-
 <p>The latest version of this module can be found at:</p>
 <ul>
 <li>http://dig.csail.mit.edu/2009/mod_authn_webid/</li>
@@ -14,7 +11,15 @@
 <li>http://esw.w3.org/topic/foaf+ssl</li>
 </ul>
 
-<h3>Prerequisites</h3>
+<h3>Requirements</h3>
+
+<p>Release versions of the following packages for your Linux
+distribution:</p>
+
+<ul>
+<li>Apache &gt;=2.2</li>
+<li>mod_ssl</li>
+</ul>
 
 <p>Development versions of the following packages for your Linux
 distribution:</p>
@@ -50,10 +55,25 @@ the mod_authn_webid DSO using default Apache module installation parameters.</p>
 
 <pre>LoadModule authn_webid_module modules/mod_authn_webid.so
 
-&lt;Directory /&gt;
+SSLVerifyClient optional_no_ca
+
+# WebID ignored
+&lt;Location /&gt;
+&lt;/Location&gt;
+
+# WebID optional
+&lt;Location /public/&gt;
+    AuthType WebID
+    Require everyone
+    AuthWebIDAuthoritative off
+&lt;/Location&gt;
+
+# WebID required
+&lt;Location /private/&gt;
     AuthType WebID
     Require valid-user
-&lt;/Directory&gt;</pre>
+&lt;/Location&gt;
+</pre>
 
 <h3>Authentication Details</h3>
 
@@ -77,16 +97,16 @@ SELECT ?m ?e ?mod ?exp WHERE {
 <p>Matching modulus and exponent triggers successful authentication.
 Only hex characters [0-9a-f] are considered for modulus comparison.</p>
 
-<p>(The optional clauses maintain compatibility for users with FOAF WebIDs
+<p>The optional clauses maintain compatibility for users with FOAF WebIDs
 before the changes to the cert datatypes discussed on foaf-protocols here:
-http://lists.foaf-project.org/pipermail/foaf-protocols/2010-March/001857.html)</p>
+http://lists.foaf-project.org/pipermail/foaf-protocols/2010-March/001857.html</p>
 
 <h3>Support</h3>
 
 <p>Please visit the <a href="http://dig.xvm.mit.edu/redmine/projects/authn-webid">issue tracker</a>
-for bug and feature requests.</p>
+for bug reports, feature requests, and other support.</p>
 
-<h3>Contact</h3>
+<h3>Author</h3>
 
 <p>Joe Presbrey<br />
 presbrey@csail.mit.edu</p>
