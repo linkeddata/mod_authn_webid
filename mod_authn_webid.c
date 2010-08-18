@@ -24,6 +24,7 @@
 #include "redland.h"
 
 #define UD_WEBID_KEY "mod_authn_webid:client_WebID"
+#define UD_TTL_KEY "mod_authn_webid:client_TTL"
 
 #define SPARQL_WEBID \
     "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>" \
@@ -118,21 +119,19 @@ authenticate_webid_user(request_rec *request) {
     }
     request->ap_auth_type = "WebID";
 
+    const char *subjAltName = NULL;
     {
         void *data = NULL;
-        const char *webid;
         if (apr_pool_userdata_get(&data, UD_WEBID_KEY, request->connection->pool) == APR_SUCCESS && data != NULL) {
-            webid = data;
-            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "using connection cached WebID: %s", webid);
-            request->user = apr_pstrdup(request->pool, webid);
-            return OK;
+            subjAltName = data;
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "get connection cached WebID: %s (%d)", subjAltName, subjAltName==NULL?0:strlen(subjAltName));
+            if (strlen(subjAltName)) {
+                request->user = apr_psprintf(request->connection->pool, "<%s>", subjAltName);
+                r = OK;
+            }
+            return r;
         }
     }
-
-    const char *subjAltName;
-    char *pkey_n = NULL;
-    char *pkey_e = NULL;
-    unsigned int pkey_e_i = 0;
 
     subjAltName = ssl_ext_lookup(request->pool, request->connection, 1, "2.5.29.17");
     if (subjAltName != NULL) {
@@ -150,6 +149,10 @@ authenticate_webid_user(request_rec *request) {
 
     BIO *bio = NULL;
     BUF_MEM *bptr = NULL;
+
+    char *pkey_n = NULL;
+    char *pkey_e = NULL;
+    unsigned int pkey_e_i = 0;
 
     if (NULL != (c_cert = ssl_var_lookup(request->pool, request->server, request->connection, request, "SSL_CLIENT_CERT"))
         && NULL != (bio_cert = BIO_new_mem_buf(c_cert, strlen(c_cert)))
@@ -172,7 +175,7 @@ authenticate_webid_user(request_rec *request) {
         pkey_e_i = apr_strtoi64(pkey_e, NULL, 16);
         BIO_free(bio);
     } else {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: invalid client certificate");
+        ap_log_rerror(APLOG_MARK, APLOG_WARN, 0, request, "WebID: invalid client certificate");
     }
 
     if (rsa)
@@ -188,7 +191,7 @@ authenticate_webid_user(request_rec *request) {
     librdf_query *rdf_query = NULL;
     librdf_query_results *rdf_query_results = NULL;
 
-    if (subjAltName != NULL
+    if (r != OK && subjAltName != NULL
         && pkey_n != NULL && pkey_e != NULL) {
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: subjectAltName = %s", subjAltName);
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.n  = %s", pkey_n);
@@ -257,22 +260,16 @@ authenticate_webid_user(request_rec *request) {
         if (rdf_world) librdf_free_world(rdf_world);
     }
 
-    if (conf->authoritative && r != OK) {
-        if (subjAltName != NULL) {
-            ap_log_rerror(APLOG_MARK, APLOG_INFO | APLOG_TOCLIENT, 0, request, "WebID authentication failed: <%s>. Request URI: %s", subjAltName, request->uri);
-        } else {
-            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID authentication failed. Request URI: %s", request->uri);
-        }
-    }
-    else if (r == OK) {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID authentication succeeded: <%s>. Request URI: %s", subjAltName, request->uri);
+    if (r == OK) {
+        ap_log_rerror(APLOG_MARK, APLOG_INFO | APLOG_TOCLIENT, 0, request, "WebID authentication (%sauthoritative) succeeded: <%s> URI: <%s> Pubkey: \"%s\"", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
         request->user = apr_psprintf(request->connection->pool, "<%s>", subjAltName);
-        {
-            apr_status_t rv;
-            rv = apr_pool_userdata_set(request->user, UD_WEBID_KEY, NULL, request->connection->pool);
-            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, rv, request, "set connection cached WebID: %s", request->user);
-        }
+    } else {
+        ap_log_rerror(APLOG_MARK, APLOG_WARNING | APLOG_TOCLIENT, 0, request, "WebID authentication (%sauthoritative) failed: <%s> URI: <%s> Pubkey: \"%s\"", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
+        subjAltName = "";
     }
+    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "set connection cached WebID: %s", subjAltName);
+    apr_pool_userdata_set(subjAltName, UD_WEBID_KEY, NULL, request->connection->pool);
+
     return r;
 }
 
