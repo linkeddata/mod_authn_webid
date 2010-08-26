@@ -124,7 +124,7 @@ authenticate_webid_user(request_rec *request) {
         void *data = NULL;
         if (apr_pool_userdata_get(&data, UD_WEBID_KEY, request->connection->pool) == APR_SUCCESS && data != NULL) {
             subjAltName = data;
-            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "get connection cached WebID: %s (%d)", subjAltName, subjAltName==NULL?0:strlen(subjAltName));
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "get connection cached WebID: %s (%d)", subjAltName, subjAltName==NULL?0:(int)strlen(subjAltName));
             if (strlen(subjAltName)) {
                 request->user = apr_psprintf(request->connection->pool, "<%s>", subjAltName);
                 r = OK;
@@ -175,7 +175,7 @@ authenticate_webid_user(request_rec *request) {
         pkey_e_i = apr_strtoi64(pkey_e, NULL, 16);
         BIO_free(bio);
     } else {
-        ap_log_rerror(APLOG_MARK, APLOG_WARN, 0, request, "WebID: invalid client certificate");
+        ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, request, "WebID: invalid client certificate");
     }
 
     if (rsa)
