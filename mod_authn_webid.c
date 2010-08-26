@@ -105,6 +105,81 @@ matches_pkey(unsigned char *s, char *pkey) {
 }
 
 static int
+validate_webid(request_rec *request, const char *subjAltName, char *pkey_n, unsigned int pkey_e_i) {
+    int r = HTTP_UNAUTHORIZED;
+
+    librdf_world *rdf_world = NULL;
+    librdf_storage *rdf_storage = NULL;
+    librdf_model *rdf_model = NULL;
+    librdf_query *rdf_query = NULL;
+    librdf_query_results *rdf_query_results = NULL;
+
+    rdf_world = librdf_new_world();
+    if (rdf_world != NULL) {
+        librdf_world_open(rdf_world);
+        rdf_storage = librdf_new_storage(rdf_world, "uri", subjAltName, NULL);
+        if (rdf_storage != NULL) {
+            rdf_model = librdf_new_model(rdf_world, rdf_storage, NULL);
+        } else
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_storage returned NULL");
+    }
+
+    if (rdf_model != NULL) {
+        char *c_query = apr_psprintf(request->pool, SPARQL_WEBID, subjAltName);
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: SPARQL query   = %s", c_query);
+        rdf_query = librdf_new_query(rdf_world, "sparql", NULL, (unsigned char*)c_query, NULL);
+    } else {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_query returned NULL");
+    }
+
+    if (rdf_query != NULL) {
+        rdf_query_results = librdf_query_execute(rdf_query, rdf_model);
+        if (rdf_query_results != NULL) {
+            for (; r != OK && librdf_query_results_finished(rdf_query_results)==0; librdf_query_results_next(rdf_query_results)) {
+                librdf_node *m_node, *e_node;
+                unsigned char *rdf_mod;
+                unsigned char *rdf_exp;
+                if (r != OK
+                    && NULL != (m_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "m"))
+                    && NULL != (e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "e"))) {
+                    if (librdf_node_get_type(m_node) != LIBRDF_NODE_TYPE_LITERAL) {
+                        librdf_free_node(m_node);
+                        m_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "mod");
+                    }
+                    if (librdf_node_get_type(e_node) != LIBRDF_NODE_TYPE_LITERAL) {
+                        librdf_free_node(e_node);
+                        e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "exp");
+                    }
+                    if (librdf_node_get_type(m_node) == LIBRDF_NODE_TYPE_LITERAL
+                        && librdf_node_get_type(e_node) == LIBRDF_NODE_TYPE_LITERAL) {
+                        rdf_mod = librdf_node_get_literal_value(m_node);
+                        rdf_exp = librdf_node_get_literal_value(e_node);
+                        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: modulus = %s", rdf_mod);
+                        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: exponent = %s", rdf_exp);
+                        if (rdf_exp != NULL
+                            && apr_strtoi64((char*)rdf_exp, NULL, 10) == pkey_e_i
+                            && matches_pkey(rdf_mod, pkey_n))
+                            r = OK;
+                        librdf_free_node(m_node);
+                        librdf_free_node(e_node);
+                    }
+                }
+            }
+            librdf_free_query_results(rdf_query_results);
+        } else
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_query_execute returned NULL");
+        librdf_free_query(rdf_query);
+    } else
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_query returned NULL");
+
+    if (rdf_model) librdf_free_model(rdf_model);
+    if (rdf_storage) librdf_free_storage(rdf_storage);
+    if (rdf_world) librdf_free_world(rdf_world);
+
+    return r;
+}
+
+static int
 authenticate_webid_user(request_rec *request) {
     int r = 0;
     authn_webid_config_rec *conf =
@@ -119,6 +194,7 @@ authenticate_webid_user(request_rec *request) {
     }
     request->ap_auth_type = "WebID";
 
+    /* Check for WebID cached in SSL session */
     const char *subjAltName = NULL;
     {
         void *data = NULL;
@@ -133,6 +209,54 @@ authenticate_webid_user(request_rec *request) {
         }
     }
 
+    /* Load X509 Public Key + Exponent */
+    char *pkey_n = NULL;
+    char *pkey_e = NULL;
+    unsigned int pkey_e_i = 0;
+    {
+        char *c_cert = NULL;
+        BIO *bio_cert = NULL;
+        X509 *x509 = NULL;
+        EVP_PKEY *pkey = NULL;
+        RSA *rsa = NULL;
+
+        BIO *bio = NULL;
+        BUF_MEM *bptr = NULL;
+
+        if (NULL != (c_cert = ssl_var_lookup(request->pool, request->server, request->connection, request, "SSL_CLIENT_CERT"))
+            && NULL != (bio_cert = BIO_new_mem_buf(c_cert, strlen(c_cert)))
+            && NULL != (x509 = PEM_read_bio_X509(bio_cert, NULL, NULL, NULL))
+            && NULL != (pkey = X509_get_pubkey(x509))
+            && NULL != (rsa = EVP_PKEY_get1_RSA(pkey))) {
+
+            // public key modulus
+            bio = BIO_new(BIO_s_mem());
+            BN_print(bio, rsa->n);
+            BIO_get_mem_ptr(bio, &bptr);
+            pkey_n = apr_pstrndup(request->pool, bptr->data, bptr->length);
+            BIO_free(bio);
+
+            // public key exponent
+            bio = BIO_new(BIO_s_mem());
+            BN_print(bio, rsa->e);
+            BIO_get_mem_ptr(bio, &bptr);
+            pkey_e = apr_pstrndup(request->pool, bptr->data, bptr->length);
+            pkey_e_i = apr_strtoi64(pkey_e, NULL, 16);
+            BIO_free(bio);
+        } else {
+            ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, request, "WebID: invalid client certificate");
+        }
+
+        if (rsa)
+            RSA_free(rsa);
+        if (pkey)
+            EVP_PKEY_free(pkey);
+        if (x509)
+            X509_free(x509);
+        if (bio_cert)
+            BIO_free(bio_cert);
+    }
+
     subjAltName = ssl_ext_lookup(request->pool, request->connection, 1, "2.5.29.17");
     if (subjAltName != NULL) {
         if (strncmp(subjAltName, "URI:", 4) != 0)
@@ -141,123 +265,12 @@ authenticate_webid_user(request_rec *request) {
             subjAltName = subjAltName+4;
     }
 
-    char *c_cert = NULL;
-    BIO *bio_cert = NULL;
-    X509 *x509 = NULL;
-    EVP_PKEY *pkey = NULL;
-    RSA *rsa = NULL;
-
-    BIO *bio = NULL;
-    BUF_MEM *bptr = NULL;
-
-    char *pkey_n = NULL;
-    char *pkey_e = NULL;
-    unsigned int pkey_e_i = 0;
-
-    if (NULL != (c_cert = ssl_var_lookup(request->pool, request->server, request->connection, request, "SSL_CLIENT_CERT"))
-        && NULL != (bio_cert = BIO_new_mem_buf(c_cert, strlen(c_cert)))
-        && NULL != (x509 = PEM_read_bio_X509(bio_cert, NULL, NULL, NULL))
-        && NULL != (pkey = X509_get_pubkey(x509))
-        && NULL != (rsa = EVP_PKEY_get1_RSA(pkey))) {
-
-        // public key modulus
-        bio = BIO_new(BIO_s_mem());
-        BN_print(bio, rsa->n);
-        BIO_get_mem_ptr(bio, &bptr);
-        pkey_n = apr_pstrndup(request->pool, bptr->data, bptr->length);
-        BIO_free(bio);
-
-        // public key exponent
-        bio = BIO_new(BIO_s_mem());
-        BN_print(bio, rsa->e);
-        BIO_get_mem_ptr(bio, &bptr);
-        pkey_e = apr_pstrndup(request->pool, bptr->data, bptr->length);
-        pkey_e_i = apr_strtoi64(pkey_e, NULL, 16);
-        BIO_free(bio);
-    } else {
-        ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, request, "WebID: invalid client certificate");
-    }
-
-    if (rsa)
-        RSA_free(rsa);
-    if (pkey)
-        EVP_PKEY_free(pkey);
-    if (bio_cert)
-        BIO_free(bio_cert);
-
-    librdf_world *rdf_world = NULL;
-    librdf_storage *rdf_storage = NULL;
-    librdf_model *rdf_model = NULL;
-    librdf_query *rdf_query = NULL;
-    librdf_query_results *rdf_query_results = NULL;
-
-    if (r != OK && subjAltName != NULL
-        && pkey_n != NULL && pkey_e != NULL) {
+    if (subjAltName != NULL && pkey_n != NULL && pkey_e != NULL) {
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: subjectAltName = %s", subjAltName);
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.n  = %s", pkey_n);
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.e  = %d (%s)", pkey_e_i, pkey_e);
-
-        rdf_world = librdf_new_world();
-        if (rdf_world != NULL) {
-            librdf_world_open(rdf_world);
-            rdf_storage = librdf_new_storage(rdf_world, "uri", subjAltName, NULL);
-            if (rdf_storage != NULL) {
-                rdf_model = librdf_new_model(rdf_world, rdf_storage, NULL);
-            } else
-                ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_storage returned NULL");
-        }
-
-        if (rdf_model != NULL) {
-            char *c_query = apr_psprintf(request->pool, SPARQL_WEBID, subjAltName);
-            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: SPARQL query   = %s", c_query);
-            rdf_query = librdf_new_query(rdf_world, "sparql", NULL, (unsigned char*)c_query, NULL);
-        } else {
-            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_query returned NULL");
-        }
-
-        if (rdf_query != NULL) {
-            rdf_query_results = librdf_query_execute(rdf_query, rdf_model);
-            if (rdf_query_results != NULL) {
-                for (; r != OK && librdf_query_results_finished(rdf_query_results)==0; librdf_query_results_next(rdf_query_results)) {
-                    librdf_node *m_node, *e_node;
-                    unsigned char *rdf_mod;
-                    unsigned char *rdf_exp;
-                    if (r != OK
-                        && NULL != (m_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "m"))
-                        && NULL != (e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "e"))) {
-                        if (librdf_node_get_type(m_node) != LIBRDF_NODE_TYPE_LITERAL) {
-                            librdf_free_node(m_node);
-                            m_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "mod");
-                        }
-                        if (librdf_node_get_type(e_node) != LIBRDF_NODE_TYPE_LITERAL) {
-                            librdf_free_node(e_node);
-                            e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "exp");
-                        }
-                        if (librdf_node_get_type(m_node) == LIBRDF_NODE_TYPE_LITERAL
-                            && librdf_node_get_type(e_node) == LIBRDF_NODE_TYPE_LITERAL) {
-                            rdf_mod = librdf_node_get_literal_value(m_node);
-                            rdf_exp = librdf_node_get_literal_value(e_node);
-                            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: modulus = %s", rdf_mod);
-                            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: exponent = %s", rdf_exp);
-                            if (rdf_exp != NULL
-                                && apr_strtoi64((char*)rdf_exp, NULL, 10) == pkey_e_i
-                                && matches_pkey(rdf_mod, pkey_n))
-                                r = OK;
-                            librdf_free_node(m_node);
-                            librdf_free_node(e_node);
-                        }
-                    }
-                }
-                librdf_free_query_results(rdf_query_results);
-            } else
-                ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_query_execute returned NULL");
-            librdf_free_query(rdf_query);
-        } else
-            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, request, "WebID: librdf_new_query returned NULL");
-
-        if (rdf_model) librdf_free_model(rdf_model);
-        if (rdf_storage) librdf_free_storage(rdf_storage);
-        if (rdf_world) librdf_free_world(rdf_world);
+        if (validate_webid(request, subjAltName, pkey_n, pkey_e_i) == OK)
+            r = OK;
     }
 
     if (r == OK) {
