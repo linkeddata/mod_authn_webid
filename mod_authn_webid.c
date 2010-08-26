@@ -179,6 +179,81 @@ validate_webid(request_rec *request, const char *subjAltName, char *pkey_n, unsi
     return r;
 }
 
+char *
+get_list_item(apr_pool_t *p, const char **field) {
+    const char *tok_start;
+    const unsigned char *ptr;
+    unsigned char *pos;
+    char *token;
+    int addspace = 0, in_qpair = 0, in_qstr = 0, in_com = 0, tok_len = 0;
+
+    if ((tok_start = ap_size_list_item(field, &tok_len)) == NULL) {
+        return NULL;
+    }
+    token = apr_palloc(p, tok_len + 1);
+
+    for (ptr = (const unsigned char *)tok_start, pos = (unsigned char *)token;
+         *ptr && (in_qpair || in_qstr || in_com || *ptr != ',');
+         ++ptr) {
+
+        if (in_qpair) {
+            in_qpair = 0;
+            *pos++ = *ptr;
+        }
+        else {
+            switch (*ptr) {
+                case '\\': in_qpair = 1;
+                           if (addspace == 1)
+                               *pos++ = ' ';
+                           *pos++ = *ptr;
+                           addspace = 0;
+                           break;
+                case '"' : if (!in_com)
+                               in_qstr = !in_qstr;
+                           if (addspace == 1)
+                               *pos++ = ' ';
+                           *pos++ = *ptr;
+                           addspace = 0;
+                           break;
+                case '(' : if (!in_qstr)
+                               ++in_com;
+                           if (addspace == 1)
+                               *pos++ = ' ';
+                           *pos++ = *ptr;
+                           addspace = 0;
+                           break;
+                case ')' : if (in_com)
+                               --in_com;
+                           *pos++ = *ptr;
+                           addspace = 0;
+                           break;
+                case ' ' :
+                case '\t': if (addspace)
+                               break;
+                           if (in_com || in_qstr)
+                               *pos++ = *ptr;
+                           else
+                               addspace = 1;
+                           break;
+                case '=' :
+                case '/' :
+                case ';' : if (!(in_com || in_qstr))
+                               addspace = -1;
+                           *pos++ = *ptr;
+                           break;
+                default  : if (addspace == 1)
+                               *pos++ = ' ';
+                           *pos++ = *ptr;
+                           addspace = 0;
+                           break;
+            }
+        }
+    }
+    *pos = '\0';
+
+    return token;
+}
+
 static int
 authenticate_webid_user(request_rec *request) {
     int r = 0;
@@ -208,12 +283,13 @@ authenticate_webid_user(request_rec *request) {
             return r;
         }
     }
+    subjAltName = ssl_ext_lookup(request->pool, request->connection, 1, "2.5.29.17");
 
     /* Load X509 Public Key + Exponent */
     char *pkey_n = NULL;
     char *pkey_e = NULL;
     unsigned int pkey_e_i = 0;
-    {
+    if (subjAltName != NULL) {
         char *c_cert = NULL;
         BIO *bio_cert = NULL;
         X509 *x509 = NULL;
@@ -257,27 +333,28 @@ authenticate_webid_user(request_rec *request) {
             BIO_free(bio_cert);
     }
 
-    subjAltName = ssl_ext_lookup(request->pool, request->connection, 1, "2.5.29.17");
-    if (subjAltName != NULL) {
-        if (strncmp(subjAltName, "URI:", 4) != 0)
-            subjAltName = NULL;
-        else
-            subjAltName = subjAltName+4;
-    }
-
-    if (subjAltName != NULL && pkey_n != NULL && pkey_e != NULL) {
+    if (pkey_n != NULL && pkey_e != NULL) {
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: subjectAltName = %s", subjAltName);
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.n  = %s", pkey_n);
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.e  = %d (%s)", pkey_e_i, pkey_e);
-        if (validate_webid(request, subjAltName, pkey_n, pkey_e_i) == OK)
-            r = OK;
+        const char *san = subjAltName;
+        char *tok;
+        while ((tok = get_list_item(request->pool, &san)) != NULL) {
+            if (strncmp(tok, "URI:", 4) == 0) {
+                if (validate_webid(request, tok+4, pkey_n, pkey_e_i) == OK) {
+                    subjAltName = tok+4;
+                    r = OK;
+                    break;
+                }
+            }
+        }
     }
 
     if (r == OK) {
-        ap_log_rerror(APLOG_MARK, APLOG_INFO | APLOG_TOCLIENT, 0, request, "WebID authentication (%sauthoritative) succeeded: <%s> URI: <%s> Pubkey: \"%s\"", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
+        ap_log_rerror(APLOG_MARK, APLOG_INFO | APLOG_TOCLIENT, 0, request, "WebID authentication (%sauthoritative) succeeded SAN: <%s> URI: <%s> Pubkey: \"%s\"", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
         request->user = apr_psprintf(request->connection->pool, "<%s>", subjAltName);
     } else {
-        ap_log_rerror(APLOG_MARK, APLOG_WARNING | APLOG_TOCLIENT, 0, request, "WebID authentication (%sauthoritative) failed: <%s> URI: <%s> Pubkey: \"%s\"", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
+        ap_log_rerror(APLOG_MARK, APLOG_WARNING | APLOG_TOCLIENT, 0, request, "WebID authentication (%sauthoritative) failed SANs: \"%s\" URI: <%s> Pubkey: \"%s\"", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
         subjAltName = "";
     }
     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "set connection cached WebID: %s", subjAltName);
