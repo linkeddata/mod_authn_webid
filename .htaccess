@@ -1,0 +1,3 @@
+<Files "Download">
+    SetHandler php5-script
+</Files>

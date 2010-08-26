@@ -1,0 +1,11 @@
+<?php
+/* $Id$
+ *
+ * snapshot the current directory
+ */
+
+header('Content-Type: application/x-gtar');
+$d = basename(dirname(__FILE__));
+$p = $d.'-'.time().'.tar.gz';
+header('Content-Disposition: attachment; filename="'.$p.'"');
+passthru('tar -C ../ -cz --exclude-vcs '.$d);
