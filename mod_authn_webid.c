@@ -37,7 +37,13 @@
     "}"
 
 static APR_OPTIONAL_FN_TYPE(ssl_var_lookup) *ssl_var_lookup;
+
+// 2010-09-28 tested against httpd-trunk r1002363
+#if AP_MODULE_MAGIC_AT_LEAST(20060101,0)
+static APR_OPTIONAL_FN_TYPE(ssl_ext_list) *ssl_ext_list;
+#else
 static APR_OPTIONAL_FN_TYPE(ssl_ext_lookup) *ssl_ext_lookup;
+#endif
 
 typedef struct {
     int authoritative;
@@ -283,13 +289,21 @@ authenticate_webid_user(request_rec *request) {
             return r;
         }
     }
+#if AP_MODULE_MAGIC_AT_LEAST(20060101,0)
+    apr_array_header_t *subjAltName_list = ssl_ext_list(request->pool, request->connection, 1, "2.5.29.17");
+#else
     subjAltName = ssl_ext_lookup(request->pool, request->connection, 1, "2.5.29.17");
+#endif
 
     /* Load X509 Public Key + Exponent */
     char *pkey_n = NULL;
     char *pkey_e = NULL;
     unsigned int pkey_e_i = 0;
+#if AP_MODULE_MAGIC_AT_LEAST(20060101,0)
+    if (subjAltName_list != NULL) {
+#else
     if (subjAltName != NULL) {
+#endif
         char *c_cert = NULL;
         BIO *bio_cert = NULL;
         X509 *x509 = NULL;
@@ -334,6 +348,23 @@ authenticate_webid_user(request_rec *request) {
     }
 
     if (pkey_n != NULL && pkey_e != NULL) {
+#if AP_MODULE_MAGIC_AT_LEAST(20060101,0)
+        const char *san;
+        char *tok;
+        int i;
+        for (i = 0; i < subjAltName_list->nelts; i++) {
+            san = APR_ARRAY_IDX(subjAltName_list, i, const char*);
+            while ((tok = get_list_item(request->pool, &san)) != NULL) {
+                if (strncmp(tok, "URI:", 4) == 0) {
+                    if (validate_webid(request, tok+4, pkey_n, pkey_e_i) == OK) {
+                        subjAltName = tok+4;
+                        r = OK;
+                        break;
+                    }
+                }
+            }
+        }
+#else
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: subjectAltName = %s", subjAltName);
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.n  = %s", pkey_n);
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: client pkey.e  = %d (%s)", pkey_e_i, pkey_e);
@@ -348,6 +379,7 @@ authenticate_webid_user(request_rec *request) {
                 }
             }
         }
+#endif
     }
 
     if (r == OK) {
@@ -366,12 +398,20 @@ authenticate_webid_user(request_rec *request) {
 static void
 import_ssl_func() {
     ssl_var_lookup = APR_RETRIEVE_OPTIONAL_FN(ssl_var_lookup);
+#if AP_MODULE_MAGIC_AT_LEAST(20060101,0)
+    ssl_ext_list = APR_RETRIEVE_OPTIONAL_FN(ssl_ext_list);
+#else
     ssl_ext_lookup = APR_RETRIEVE_OPTIONAL_FN(ssl_ext_lookup);
+#endif
 }
 
 static void
 register_hooks(apr_pool_t *p) {
+#if AP_MODULE_MAGIC_AT_LEAST(20080403,1)
+    ap_hook_check_authn(authenticate_webid_user, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_URI);
+#else
     ap_hook_check_user_id(authenticate_webid_user, NULL, NULL, APR_HOOK_MIDDLE);
+#endif
     ap_hook_optional_fn_retrieve(import_ssl_func, NULL, NULL, APR_HOOK_MIDDLE);
 }
 
