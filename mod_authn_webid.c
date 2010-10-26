@@ -283,7 +283,7 @@ authenticate_webid_user(request_rec *request) {
             subjAltName = data;
             ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "get connection cached WebID: %s (%d)", subjAltName, subjAltName==NULL?0:(int)strlen(subjAltName));
             if (strlen(subjAltName)) {
-                request->user = apr_psprintf(request->connection->pool, "<%s>", subjAltName);
+                request->user = (char *)subjAltName;
                 r = OK;
             }
             return r;
@@ -384,13 +384,13 @@ authenticate_webid_user(request_rec *request) {
 
     if (r == OK) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO | APLOG_TOCLIENT, 0, request, "WebID authentication (%sauthoritative) succeeded SAN: <%s> URI: <%s> Pubkey: \"%s\"", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
-        request->user = apr_psprintf(request->connection->pool, "<%s>", subjAltName);
+        request->user = apr_psprintf(request->connection->pool, "%s", subjAltName);
     } else {
         ap_log_rerror(APLOG_MARK, APLOG_WARNING | APLOG_TOCLIENT, 0, request, "WebID authentication (%sauthoritative) failed SANs: \"%s\" URI: <%s> Pubkey: \"%s\"", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
         subjAltName = "";
     }
     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "set connection cached WebID: %s", subjAltName);
-    apr_pool_userdata_set(subjAltName, UD_WEBID_KEY, NULL, request->connection->pool);
+    apr_pool_userdata_set(apr_pstrdup(request->connection->pool, subjAltName), UD_WEBID_KEY, NULL, request->connection->pool);
 
     return r;
 }
