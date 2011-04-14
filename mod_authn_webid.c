@@ -281,7 +281,7 @@ authenticate_webid_user(request_rec *request) {
         void *data = NULL;
         if (apr_pool_userdata_get(&data, UD_WEBID_KEY, request->connection->pool) == APR_SUCCESS && data != NULL) {
             subjAltName = data;
-            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "get connection cached WebID: %s (%d)", subjAltName, subjAltName==NULL?0:(int)strlen(subjAltName));
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: using cached URI <%s>", subjAltName);
             if (strlen(subjAltName)) {
                 request->user = (char *)subjAltName;
                 r = OK;
@@ -334,7 +334,7 @@ authenticate_webid_user(request_rec *request) {
             pkey_e_i = apr_strtoi64(pkey_e, NULL, 16);
             BIO_free(bio);
         } else {
-            ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, request, "WebID: invalid client certificate");
+            ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, request, "WebID: invalid client SSL certificate");
         }
 
         if (rsa)
@@ -383,13 +383,13 @@ authenticate_webid_user(request_rec *request) {
     }
 
     if (r == OK) {
-        ap_log_rerror(APLOG_MARK, APLOG_INFO | APLOG_TOCLIENT, 0, request, "WebID authentication (%sauthoritative) succeeded SAN: <%s> URI: <%s> Pubkey: \"%s\"", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
+        ap_log_rerror(APLOG_MARK, APLOG_INFO | APLOG_TOCLIENT, 0, request, "WebID: authentication (%sauthoritative) succeeded for <%s> pubkey: \"%s\", URI: <%s>", conf->authoritative?"":"non-", subjAltName, pkey_n, request->uri);
         request->user = apr_psprintf(request->connection->pool, "%s", subjAltName);
     } else {
-        ap_log_rerror(APLOG_MARK, APLOG_WARNING | APLOG_TOCLIENT, 0, request, "WebID authentication (%sauthoritative) failed SANs: \"%s\" URI: <%s> Pubkey: \"%s\"", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
+        ap_log_rerror(APLOG_MARK, (conf->authoritative?APLOG_WARNING:APLOG_INFO) | APLOG_TOCLIENT, 0, request, "WebID: authentication (%sauthoritative) failed for <%s> pubkey: \"%s\", URI: <%s>", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
         subjAltName = "";
     }
-    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "set connection cached WebID: %s", subjAltName);
+    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: setting cached URI <%s>", subjAltName);
     apr_pool_userdata_set(apr_pstrdup(request->connection->pool, subjAltName), UD_WEBID_KEY, NULL, request->connection->pool);
 
     return r;
