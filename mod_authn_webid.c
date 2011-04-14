@@ -93,6 +93,9 @@ static int
 matches_pkey(unsigned char *s, char *pkey) {
     if (s == NULL || pkey == NULL)
         return 0;
+    // eliminate leading zeros
+    while (s[0] == '0') s++;
+    while (pkey[0] == '0') pkey++;
     unsigned int s_s = strlen((const char*)s);
     unsigned int s_pkey = strlen(pkey);
     unsigned int fc, pc, j, k = 0;
