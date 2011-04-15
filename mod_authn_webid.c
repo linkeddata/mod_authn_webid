@@ -389,7 +389,7 @@ authenticate_webid_user(request_rec *request) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO | APLOG_TOCLIENT, 0, request, "WebID: authentication (%sauthoritative) succeeded for <%s> pubkey: \"%s\", URI: <%s>", conf->authoritative?"":"non-", subjAltName, pkey_n, request->uri);
         request->user = apr_psprintf(request->connection->pool, "%s", subjAltName);
     } else {
-        ap_log_rerror(APLOG_MARK, (conf->authoritative?APLOG_WARNING:APLOG_INFO) | APLOG_TOCLIENT, 0, request, "WebID: authentication (%sauthoritative) failed for <%s> pubkey: \"%s\", URI: <%s>", conf->authoritative?"":"non-", subjAltName, request->uri, pkey_n);
+        ap_log_rerror(APLOG_MARK, (conf->authoritative?APLOG_WARNING:APLOG_INFO) | APLOG_TOCLIENT, 0, request, "WebID: authentication (%sauthoritative) failed for <%s> pubkey: \"%s\", URI: <%s>", conf->authoritative?"":"non-", subjAltName, pkey_n, request->uri);
         subjAltName = "";
     }
     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, "WebID: setting cached URI <%s>", subjAltName);
