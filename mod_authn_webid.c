@@ -27,13 +27,9 @@
 #define UD_TTL_KEY "mod_authn_webid:client_TTL"
 
 #define SPARQL_WEBID \
-    "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>" \
-    "PREFIX cert: <http://www.w3.org/ns/auth/cert#>" \
-    "PREFIX rsa: <http://www.w3.org/ns/auth/rsa#>" \
-    "SELECT ?m ?e ?mod ?exp WHERE {" \
-    "  ?key cert:identity <%s>; rsa:modulus ?m; rsa:public_exponent ?e." \
-    "  OPTIONAL { ?m cert:hex ?mod. }" \
-    "  OPTIONAL { ?e cert:decimal ?exp. }" \
+    "PREFIX : <http://www.w3.org/ns/auth/cert#>" \
+    "SELECT ?m ?e WHERE {" \
+    "  <%s> :key [ :modulus ?m; :exponent ?e; ] ." \
     "}"
 
 static APR_OPTIONAL_FN_TYPE(ssl_var_lookup) *ssl_var_lookup;
@@ -151,14 +147,6 @@ validate_webid(request_rec *request, const char *subjAltName, char *pkey_n, unsi
                 if (r != OK
                     && NULL != (m_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "m"))
                     && NULL != (e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "e"))) {
-                    if (librdf_node_get_type(m_node) != LIBRDF_NODE_TYPE_LITERAL) {
-                        librdf_free_node(m_node);
-                        m_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "mod");
-                    }
-                    if (librdf_node_get_type(e_node) != LIBRDF_NODE_TYPE_LITERAL) {
-                        librdf_free_node(e_node);
-                        e_node = librdf_query_results_get_binding_value_by_name(rdf_query_results, "exp");
-                    }
                     if (librdf_node_get_type(m_node) == LIBRDF_NODE_TYPE_LITERAL
                         && librdf_node_get_type(e_node) == LIBRDF_NODE_TYPE_LITERAL) {
                         rdf_mod = librdf_node_get_literal_value(m_node);
