@@ -109,6 +109,35 @@ matches_pkey(unsigned char *s, char *pkey) {
     return 0;
 }
 
+static int ap_rdf_log_proxy(void *user_data, librdf_log_message *message)
+{
+    request_rec *request = (request_rec *)user_data;
+    librdf_log_level rdf_level;
+    const char *msg = 0;
+    int ap_level = 0;
+    if (request == NULL || message == NULL) {
+        return 0;
+    }
+    msg = librdf_log_message_message(message);
+    if (msg == NULL) {
+        return 0;
+    }
+    rdf_level = librdf_log_message_level(message);
+    if (rdf_level == LIBRDF_LOG_FATAL) {
+      ap_level = APLOG_EMERG;
+    } else if (rdf_level == LIBRDF_LOG_ERROR) {
+      ap_level = APLOG_ERR;
+    } else if (rdf_level == LIBRDF_LOG_WARN) {
+      ap_level = APLOG_WARNING;
+    } else if (rdf_level == LIBRDF_LOG_INFO) {
+      ap_level = APLOG_INFO;
+    } else /* assume debug */ {
+      ap_level = APLOG_DEBUG;
+    }
+    ap_log_rerror(APLOG_MARK, ap_level, 0, request, "%s", msg);
+    return 1;
+}
+
 static int
 validate_webid(request_rec *request, const char *subjAltName, char *pkey_n, unsigned int pkey_e_i) {
     int r = HTTP_UNAUTHORIZED;
@@ -122,6 +151,7 @@ validate_webid(request_rec *request, const char *subjAltName, char *pkey_n, unsi
     rdf_world = librdf_new_world();
     if (rdf_world != NULL) {
         librdf_world_open(rdf_world);
+        librdf_world_set_logger(rdf_world, (void *)request, ap_rdf_log_proxy);
         rdf_storage = librdf_new_storage(rdf_world, "uri", subjAltName, NULL);
         if (rdf_storage != NULL) {
             rdf_model = librdf_new_model(rdf_world, rdf_storage, NULL);
